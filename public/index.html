@@ -33,6 +33,9 @@
         <h2 id="chat-title">Chat Privado</h2>
       </div>
       <div class="header-right">
+        <button id="theme-toggle" class="btn btn-secondary btn-sm" title="Alternar tema" aria-label="Alternar tema">
+          <span id="theme-icon">🌙</span>
+        </button>
         <span id="current-user" class="user-badge"></span>
       </div>
     </header>
@@ -49,13 +52,56 @@
         </div>
         <div id="chat-container" class="chat-container hidden">
           <div id="messages-area" class="messages-area"></div>
+          
+          <div id="reply-preview" class="reply-preview hidden">
+            <span id="reply-preview-text"></span>
+            <button type="button" id="reply-cancel" class="btn btn-secondary btn-sm">×</button>
+          </div>
+
           <form id="message-form" class="message-form">
-            <input type="text" id="message-input" placeholder="Digite sua mensagem..." required autocomplete="off">
-            <button type="submit" class="btn btn-primary">Enviar</button>
+            <div class="message-input-wrapper">
+              <button type="button" id="attach-btn" class="attach-btn" title="Anexar arquivo" aria-label="Anexar arquivo">📎</button>
+              <input type="file" id="file-input" accept="image/*,audio/*" hidden>
+              <input type="text" id="message-input" placeholder="Digite sua mensagem..." autocomplete="off">
+              <button type="button" id="audio-btn" class="audio-btn" title="Gravar áudio" aria-label="Gravar áudio">🎤</button>
+            </div>
+            <button type="submit" class="btn btn-primary" id="send-btn">Enviar</button>
           </form>
         </div>
       </section>
     </main>
+  </div>
+
+  <div id="audio-recorder" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="audio-title">
+    <div class="modal-content audio-recorder-content">
+      <h3 id="audio-title">Gravando áudio...</h3>
+      <div class="audio-visualizer" id="audio-visualizer"></div>
+      <div class="audio-timer" id="audio-timer">00:00</div>
+      <div class="audio-controls">
+        <button type="button" id="audio-cancel" class="btn btn-secondary">Cancelar</button>
+        <button type="button" id="audio-stop" class="btn btn-danger" disabled>Parar</button>
+        <button type="button" id="audio-send" class="btn btn-primary" disabled>Enviar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="context-menu" class="context-menu hidden" role="menu">
+    <button type="button" class="context-menu-item" data-action="reply" role="menuitem">💬 Responder</button>
+    <button type="button" class="context-menu-item" data-action="edit" role="menuitem">✏️ Editar</button>
+    <button type="button" class="context-menu-item" data-action="delete" role="menuitem">🗑️ Apagar para mim</button>
+    <button type="button" class="context-menu-item" data-action="delete-everyone" role="menuitem">🗑️ Apagar para todos</button>
+    <button type="button" class="context-menu-item" data-action="react" role="menuitem">⭐ Reagir</button>
+  </div>
+
+  <div id="reaction-picker" class="reaction-picker hidden" role="menu">
+    <button type="button" class="reaction-btn" data-emoji="👍" role="menuitem">👍</button>
+    <button type="button" class="reaction-btn" data-emoji="❤️" role="menuitem">❤️</button>
+    <button type="button" class="reaction-btn" data-emoji="😂" role="menuitem">😂</button>
+    <button type="button" class="reaction-btn" data-emoji="😮" role="menuitem">😮</button>
+    <button type="button" class="reaction-btn" data-emoji="😢" role="menuitem">😢</button>
+    <button type="button" class="reaction-btn" data-emoji="😡" role="menuitem">😡</button>
+    <button type="button" class="reaction-btn" data-emoji="🎉" role="menuitem">🎉</button>
+    <button type="button" class="reaction-btn" data-emoji="🙏" role="menuitem">🙏</button>
   </div>
 
   <script src="app.js"></script>
