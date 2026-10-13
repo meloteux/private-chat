@@ -2,13 +2,6 @@
 
 Chat privado para duas pessoas, com mensagens guardadas em banco de dados local (SQLite).
 
-## Usuários
-
-| Usuário | Senha |
-|---------|-------|
-| `mateus` | `01850309` |
-| `debora` | `23092025` |
-
 Cada um entra na própria conta. Só esses dois conseguem acessar.
 
 ## Como rodar
