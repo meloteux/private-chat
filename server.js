@@ -36,11 +36,16 @@ const fileFilter = (req, file, cb) => {
   else cb(new Error('Tipo de arquivo não permitido'), false);
 };
 
-const upload = multer({ 
-  storage, 
+const upload = multer({
+  storage,
   fileFilter,
   limits: { fileSize: 25 * 1024 * 1024 }
 });
+
+function generateRandomSecret() {
+  const crypto = require('crypto');
+  return crypto.randomBytes(32).toString('hex');
+}
 
 function dbGet(sql, params) {
   return new Promise((resolve, reject) => {
@@ -88,10 +93,10 @@ app.use(express.json());
 app.use('/uploads', express.static(uploadsDir));
 app.use(express.static(path.join(__dirname, 'public')));
 const sessionMiddleware = session({
-  secret: 'private-chat-secret-key-2026',
+  secret: process.env.SESSION_SECRET || generateRandomSecret(),
   resave: false,
   saveUninitialized: false,
-  cookie: { secure: false, maxAge: 24 * 60 * 60 * 1000 }
+  cookie: { secure: process.env.NODE_ENV === 'production', maxAge: 24 * 60 * 60 * 1000 }
 });
 
 app.use(sessionMiddleware);
