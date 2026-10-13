@@ -11,6 +11,9 @@ let audioTimerInterval = null;
 let audioContext = null;
 let audioAnalyser = null;
 let lastMessageIds = new Set();
+let hasMoreMessages = false;
+let oldestMessageId = null;
+let isLoadingOlder = false;
 
 async function apiRequest(url, options = {}) {
   const response = await fetch(url, {
@@ -83,9 +86,6 @@ function connectWebSocket() {
   if (ws && ws.readyState <= 1) return;
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   ws = new WebSocket(`${protocol}//${location.host}`);
-  ws.onopen = () => {
-    if (currentUser) ws.send(JSON.stringify({ type: 'auth', userId: currentUser.id }));
-  };
   ws.onmessage = (event) => handleWsMessage(JSON.parse(event.data));
   ws.onclose = () => {
     if (currentUser) setTimeout(connectWebSocket, 3000);
@@ -111,7 +111,11 @@ function handleWsMessage(data) {
       break;
     }
     case 'message_deleted': {
-      removeMessageElement(data.messageId);
+      if (data.forEveryone) {
+        updateMessageElement({ id: data.messageId, sender_id: 0, sender_name: '', created_at: '', deleted_at: 1, deleted_for_everyone: 1, type: 'text', reactions: [] });
+      } else {
+        removeMessageElement(data.messageId);
+      }
       break;
     }
     case 'reactions_updated': {
@@ -160,14 +164,44 @@ async function selectContact(contact) {
   document.getElementById('chat-container').classList.remove('hidden');
   document.getElementById('chat-title').textContent = `Conversa com ${contact.username}`;
   await loadMessages();
+  const area = document.getElementById('messages-area');
+  area.onscroll = () => {
+    if (isLoadingOlder || !hasMoreMessages || !oldestMessageId) return;
+    if (area.scrollTop < 20) {
+      isLoadingOlder = true;
+      loadMessages(oldestMessageId).finally(() => { isLoadingOlder = false; });
+    }
+  };
 }
 
-async function loadMessages() {
+async function loadMessages(before) {
   if (!selectedContact) return;
   try {
-    const data = await apiRequest(`/api/messages/${selectedContact.id}`);
-    lastMessageIds = new Set(data.messages.map(m => m.id));
-    renderMessages(data.messages);
+    const params = new URLSearchParams({ limit: '50' });
+    if (before) params.set('before', before);
+    const data = await apiRequest(`/api/messages/${selectedContact.id}?${params.toString()}`);
+    if (before) {
+      const area = document.getElementById('messages-area');
+      const prevScrollHeight = area.scrollHeight;
+      const prevScrollTop = area.scrollTop;
+      const frag = document.createDocumentFragment();
+      data.messages.forEach(msg => {
+        if (lastMessageIds.has(msg.id)) return;
+        lastMessageIds.add(msg.id);
+        frag.appendChild(buildMessageElement(msg));
+      });
+      if (frag.childNodes.length) {
+        area.insertBefore(frag, area.firstChild);
+        area.scrollTop = prevScrollTop + (area.scrollHeight - prevScrollHeight);
+      }
+    } else {
+      lastMessageIds = new Set(data.messages.map(m => m.id));
+      renderMessages(data.messages);
+    }
+    if (data.messages.length) {
+      oldestMessageId = data.messages[0].id;
+    }
+    hasMoreMessages = data.messages.length >= 50;
   } catch (e) {
     console.error('Failed to load messages:', e);
   }
@@ -180,6 +214,20 @@ function renderMessages(messages) {
   area.scrollTop = area.scrollHeight;
 }
 
+function renderReactions(reactions) {
+  if (!reactions || !reactions.length) return '';
+  const grouped = {};
+  for (const r of reactions) {
+    if (!grouped[r.emoji]) grouped[r.emoji] = { emoji: r.emoji, count: 0, own: false, users: [] };
+    grouped[r.emoji].count++;
+    if (r.user_id === currentUser.id) grouped[r.emoji].own = true;
+    if (r.username && !grouped[r.emoji].users.includes(r.username)) grouped[r.emoji].users.push(r.username);
+  }
+  return `<div class="message-reactions">` + Object.values(grouped).map(g =>
+    `<button type="button" class="reaction${g.own ? ' own' : ''}" data-emoji="${escapeHtml(g.emoji)}" title="${escapeHtml(g.users.join(', '))}">${g.emoji}<span class="reaction-count">${g.count}</span></button>`
+  ).join('') + `</div>`;
+}
+
 function buildMessageElement(msg) {
   const div = document.createElement('div');
   div.className = `message ${msg.sender_id === currentUser.id ? 'sent' : 'received'}`;
@@ -189,11 +237,10 @@ function buildMessageElement(msg) {
 
   const time = formatTime(msg.created_at);
   const isMine = msg.sender_id === currentUser.id;
-  const canActOn = !msg.deleted_at && selectedContact === (selectedContact || {});
 
   let bodyHtml = '';
   if (msg.deleted_at) {
-    bodyHtml = `<div class="message-content"><em>${msg.deleted_for_everyone ? 'Mensagem apagada' : 'Mensagem apagada'}</em></div>`;
+    bodyHtml = `<div class="message-content"><em>Mensagem apagada</em></div>`;
   } else {
     if (msg.reply_to_id) {
       bodyHtml += `<div class="message-reply">↩ respondendo</div>`;
@@ -210,13 +257,7 @@ function buildMessageElement(msg) {
     }
   }
 
-  const reactions = msg.reactions || [];
-  if (reactions.length) {
-    bodyHtml += `<div class="message-reactions">` + reactions.map(r => {
-      const own = r.user_id === currentUser.id ? ' own' : '';
-      return `<button type="button" class="reaction${own}" data-emoji="${r.emoji}" title="${escapeHtml(r.username)}">${r.emoji}<span class="reaction-count">1</span></button>`;
-    }).join('') + `</div>`;
-  }
+  bodyHtml += renderReactions(msg.reactions);
 
   div.innerHTML = `
     <div class="message-header">
@@ -305,10 +346,7 @@ function updateReactionsElement(messageId, reactions) {
     if (container) container.remove();
     return;
   }
-  const html = `<div class="message-reactions">` + reactions.map(r => {
-    const own = r.user_id === currentUser.id ? ' own' : '';
-    return `<button type="button" class="reaction${own}" data-emoji="${r.emoji}" title="${escapeHtml(r.username)}">${r.emoji}<span class="reaction-count">1</span></button>`;
-  }).join('') + `</div>`;
+  const html = renderReactions(reactions);
   if (container) container.outerHTML = html;
   else el.insertAdjacentHTML('beforeend', html);
   el.querySelectorAll('.reaction').forEach(btn => {
@@ -317,6 +355,7 @@ function updateReactionsElement(messageId, reactions) {
 }
 
 function formatTime(dateStr) {
+  if (!dateStr) return '';
   return new Date(dateStr + 'Z').toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 }
 
@@ -376,6 +415,7 @@ async function sendFile(file, type) {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Erro no upload');
     cancelReply();
+    return data.message;
   } catch (e) {
     alert('Erro no upload: ' + e.message);
   }
@@ -511,6 +551,17 @@ async function startAudioRecording() {
     audioChunks = [];
     audioRecorder = new MediaRecorder(audioStream);
     audioRecorder.ondataavailable = (e) => audioChunks.push(e.data);
+    audioRecorder.onstop = () => {
+      if (audioStream) {
+        audioStream.getTracks().forEach(t => t.stop());
+        audioStream = null;
+      }
+      if (audioContext) {
+        audioContext.close().catch(() => {});
+        audioContext = null;
+        audioAnalyser = null;
+      }
+    };
 
     audioContext = new AudioContext();
     const source = audioContext.createMediaStreamSource(audioStream);
@@ -521,6 +572,7 @@ async function startAudioRecording() {
     document.getElementById('audio-recorder').classList.remove('hidden');
     document.getElementById('audio-stop').disabled = false;
     document.getElementById('audio-send').disabled = true;
+    document.getElementById('audio-btn').classList.add('recording');
 
     audioStartTime = Date.now();
     audioTimerInterval = setInterval(updateAudioTimer, 100);
@@ -562,12 +614,12 @@ function updateAudioVisualizer() {
 }
 
 function stopAudioRecording() {
-  if (audioRecorder && audioRecorder.state === 'recording') {
-    audioRecorder.stop();
-  }
   clearInterval(audioTimerInterval);
   document.getElementById('audio-stop').disabled = true;
   document.getElementById('audio-send').disabled = false;
+  if (audioRecorder && audioRecorder.state === 'recording') {
+    audioRecorder.stop();
+  }
 }
 
 function cancelAudioRecording() {
@@ -575,18 +627,24 @@ function cancelAudioRecording() {
   audioChunks = [];
   clearInterval(audioTimerInterval);
   closeAudioRecorder();
-  if (audioStream) audioStream.getTracks().forEach(t => t.stop());
 }
 
 function closeAudioRecorder() {
   document.getElementById('audio-recorder').classList.add('hidden');
+  document.getElementById('audio-btn').classList.remove('recording');
   document.getElementById('audio-timer').textContent = '00:00';
   const container = document.getElementById('audio-visualizer');
   if (container) container.innerHTML = '';
-  if (audioContext) audioContext.close();
+  if (audioContext) {
+    audioContext.close().catch(() => {});
+    audioContext = null;
+  }
+  if (audioStream) {
+    audioStream.getTracks().forEach(t => t.stop());
+    audioStream = null;
+  }
   audioRecorder = null;
   audioAnalyser = null;
-  audioContext = null;
 }
 
 async function sendAudioRecording() {
@@ -597,19 +655,13 @@ async function sendAudioRecording() {
   const duration = Math.floor((Date.now() - audioStartTime) / 1000);
 
   closeAudioRecorder();
-  if (audioStream) audioStream.getTracks().forEach(t => t.stop());
 
-  await sendFile(file, 'audio');
-
-  const data = await apiRequest(`/api/messages/${selectedContact.id}`).catch(() => null);
-  if (data && data.messages.length) {
-    const last = data.messages[data.messages.length - 1];
-    if (last.type === 'audio' && !last.media_duration) {
-      apiRequest('/api/audio-duration', {
-        method: 'POST',
-        body: JSON.stringify({ messageId: last.id, duration })
-      }).catch(() => {});
-    }
+  const message = await sendFile(file, 'audio');
+  if (message && message.type === 'audio' && !message.media_duration) {
+    apiRequest('/api/audio-duration', {
+      method: 'POST',
+      body: JSON.stringify({ messageId: message.id, duration })
+    }).catch(() => {});
   }
 }
 

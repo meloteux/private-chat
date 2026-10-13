@@ -66,6 +66,15 @@ async function init() {
     UNIQUE(message_id, user_id, emoji)
   )`);
 
+  await run(`CREATE TABLE IF NOT EXISTS message_deletions (
+    message_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (message_id, user_id),
+    FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+  )`);
+
   const userCols = (await all(`PRAGMA table_info(users)`)).map(r => r.name);
   const msgCols = (await all(`PRAGMA table_info(messages)`)).map(r => r.name);
 
@@ -100,6 +109,8 @@ async function init() {
 
   await run(`CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(sender_id, recipient_id)`);
   await run(`CREATE INDEX IF NOT EXISTS idx_reactions_message ON reactions(message_id)`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_message_deletions_lookup ON message_deletions(message_id, user_id)`);
+  await run('PRAGMA foreign_keys = ON');
 
   const users = [
     { username: 'mateus', password: '01850309' },

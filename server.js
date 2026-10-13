@@ -14,6 +14,7 @@ const wss = new WebSocketServer({ server });
 
 const dbPath = path.join(__dirname, 'chat.db');
 const db = new sqlite3.Database(dbPath);
+db.run('PRAGMA foreign_keys = ON');
 
 const uploadsDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadsDir)) {
@@ -61,30 +62,39 @@ function dbRun(sql, params) {
   });
 }
 
+async function getReactionsFor(messageId) {
+  const rows = await dbAll(`SELECT r.*, u.username FROM reactions r JOIN users u ON r.user_id = u.id WHERE r.message_id = ?`, [messageId]);
+  return rows.map(r => ({ emoji: r.emoji, user_id: r.user_id, username: r.username }));
+}
+
+async function getMessageById(id) {
+  const message = await dbGet(`SELECT m.*, u.username as sender_name, u.avatar_url as sender_avatar FROM messages m JOIN users u ON m.sender_id = u.id WHERE m.id = ?`, [id]);
+  if (!message) return null;
+  message.reactions = await getReactionsFor(id);
+  return message;
+}
+
+async function assertValidReplyTo(replyToId, senderId, recipientId) {
+  if (!replyToId) return null;
+  const reference = await dbGet('SELECT sender_id, recipient_id FROM messages WHERE id = ?', [replyToId]);
+  const participants = reference ? [reference.sender_id, reference.recipient_id] : [];
+  if (!participants.includes(senderId) || !participants.includes(Number(recipientId))) {
+    return { error: 'Mensagem de referência inválida' };
+  }
+  return null;
+}
+
 app.use(express.json());
 app.use('/uploads', express.static(uploadsDir));
 app.use(express.static(path.join(__dirname, 'public')));
-app.use(session({
+const sessionMiddleware = session({
   secret: 'private-chat-secret-key-2026',
   resave: false,
   saveUninitialized: false,
   cookie: { secure: false, maxAge: 24 * 60 * 60 * 1000 }
-}));
+});
 
-function handleUploadErrors(err, req, res, next) {
-  if (err instanceof multer.MulterError) {
-    if (err.code === 'LIMIT_FILE_SIZE') {
-      return res.status(413).json({ error: 'Arquivo muito grande (máx 25MB)' });
-    }
-    return res.status(400).json({ error: `Erro no upload: ${err.message}` });
-  }
-  if (err) {
-    return res.status(415).json({ error: err.message || 'Tipo de arquivo não permitido' });
-  }
-  next();
-}
-
-app.use(handleUploadErrors);
+app.use(sessionMiddleware);
 
 function authenticate(req, res, next) {
   if (req.session.userId) next();
@@ -151,14 +161,30 @@ app.get('/api/messages/:otherUserId', authenticate, async (req, res) => {
   try {
     const { otherUserId } = req.params;
     const myId = req.session.userId;
-    const messages = await dbAll(`
+
+    let limit = parseInt(req.query.limit, 10);
+    if (!Number.isFinite(limit) || limit < 1) limit = 50;
+    limit = Math.min(limit, 200);
+
+    const params = [myId, otherUserId, otherUserId, myId, myId];
+    let query = `
       SELECT m.*, u.username as sender_name, u.avatar_url as sender_avatar
       FROM messages m
       JOIN users u ON m.sender_id = u.id
       WHERE ((m.sender_id = ? AND m.recipient_id = ?) OR (m.sender_id = ? AND m.recipient_id = ?))
-        AND m.deleted_at IS NULL
-      ORDER BY m.created_at ASC
-    `, [myId, otherUserId, otherUserId, myId]);
+        AND NOT EXISTS (SELECT 1 FROM message_deletions d WHERE d.message_id = m.id AND d.user_id = ?)`;
+
+    if (req.query.before !== undefined && req.query.before !== null && req.query.before !== '') {
+      const before = parseInt(req.query.before, 10);
+      if (!Number.isFinite(before)) return res.status(400).json({ error: 'Parâmetro before inválido' });
+      query += ' AND m.id < ?';
+      params.push(before);
+    }
+
+    query += ' ORDER BY m.created_at DESC, m.id DESC LIMIT ?';
+    params.push(limit);
+
+    const messages = (await dbAll(query, params)).reverse();
 
     const messageIds = messages.map(m => m.id);
     let reactions = [];
@@ -198,21 +224,24 @@ app.post('/api/messages', authenticate, async (req, res) => {
       return res.status(400).json({ error: 'Mensagem vazia' });
     }
 
+    if (!recipientId || Number(recipientId) === senderId) {
+      return res.status(400).json({ error: 'Destinatário inválido' });
+    }
+
+    const recipient = await dbGet('SELECT id FROM users WHERE id = ?', [recipientId]);
+    if (!recipient) return res.status(400).json({ error: 'Destinatário não encontrado' });
+
+    const replyError = await assertValidReplyTo(replyToId, senderId, recipientId);
+    if (replyError) return res.status(400).json(replyError);
+
     const result = await dbRun(
       `INSERT INTO messages (sender_id, recipient_id, type, content, reply_to_id) VALUES (?, ?, ?, ?, ?)`,
       [senderId, recipientId, type, content?.trim() || '', replyToId || null]
     );
 
-    const message = await dbGet(`
-      SELECT m.*, u.username as sender_name, u.avatar_url as sender_avatar
-      FROM messages m
-      JOIN users u ON m.sender_id = u.id
-      WHERE m.id = ?
-    `, [result.lastInsertRowid]);
+    const message = await getMessageById(result.lastInsertRowid);
 
-    message.reactions = [];
-    broadcastToUser(recipientId, { type: 'new_message', message });
-    broadcastToUser(senderId, { type: 'new_message', message });
+    broadcastToConversation(senderId, recipient.id, { type: 'new_message', message });
 
     res.json({ success: true, message });
   } catch (e) {
@@ -246,6 +275,16 @@ app.post('/api/messages/media', authenticate, async (req, res) => {
     const file = req.file;
     if (!file) return res.status(400).json({ error: 'Arquivo não enviado' });
 
+    if (!recipientId || Number(recipientId) === senderId) {
+      return res.status(400).json({ error: 'Destinatário inválido' });
+    }
+
+    const recipient = await dbGet('SELECT id FROM users WHERE id = ?', [recipientId]);
+    if (!recipient) return res.status(400).json({ error: 'Destinatário não encontrado' });
+
+    const replyError = await assertValidReplyTo(replyToId, senderId, recipientId);
+    if (replyError) return res.status(400).json(replyError);
+
     let messageType = type || (file.mimetype.startsWith('image/') ? 'image' : 'audio');
     let content = '';
     let duration = null;
@@ -261,16 +300,9 @@ app.post('/api/messages/media', authenticate, async (req, res) => {
       [senderId, recipientId, messageType, content, `/uploads/${file.filename}`, file.originalname, file.size, duration, replyToId || null]
     );
 
-    const message = await dbGet(`
-      SELECT m.*, u.username as sender_name, u.avatar_url as sender_avatar
-      FROM messages m
-      JOIN users u ON m.sender_id = u.id
-      WHERE m.id = ?
-    `, [result.lastInsertRowid]);
+    const message = await getMessageById(result.lastInsertRowid);
 
-    message.reactions = [];
-    broadcastToUser(recipientId, { type: 'new_message', message });
-    broadcastToUser(senderId, { type: 'new_message', message });
+    broadcastToConversation(senderId, recipient.id, { type: 'new_message', message });
 
     res.json({ success: true, message });
   } catch (e) {
@@ -290,17 +322,15 @@ app.patch('/api/messages/:id', authenticate, async (req, res) => {
     if (message.sender_id !== userId) return res.status(403).json({ error: 'Não autorizado' });
     if (message.deleted_at) return res.status(400).json({ error: 'Mensagem deletada' });
 
+    if (!content || !content.trim()) {
+      return res.status(400).json({ error: 'Conteúdo vazio' });
+    }
+
     await dbRun('UPDATE messages SET content = ?, edited_at = CURRENT_TIMESTAMP WHERE id = ?', [content.trim(), id]);
 
-    const updated = await dbGet(`
-      SELECT m.*, u.username as sender_name, u.avatar_url as sender_avatar
-      FROM messages m
-      JOIN users u ON m.sender_id = u.id
-      WHERE m.id = ?
-    `, [id]);
+    const updated = await getMessageById(id);
 
-    broadcastToUser(message.recipient_id, { type: 'message_updated', message: updated });
-    broadcastToUser(userId, { type: 'message_updated', message: updated });
+    broadcastToConversation(message.sender_id, message.recipient_id, { type: 'message_updated', message: updated });
 
     res.json({ success: true, message: updated });
   } catch (e) {
@@ -319,12 +349,12 @@ app.delete('/api/messages/:id', authenticate, async (req, res) => {
     if (message.sender_id !== userId) return res.status(403).json({ error: 'Não autorizado' });
 
     if (forEveryone) {
-      await dbRun('UPDATE messages SET deleted_at = CURRENT_TIMESTAMP, deleted_for_everyone = 1, content = "Esta mensagem foi apagada" WHERE id = ?', [id]);
+      await dbRun(`UPDATE messages SET deleted_at = CURRENT_TIMESTAMP, deleted_for_everyone = 1, content = 'Esta mensagem foi apagada' WHERE id = ?`, [id]);
+      broadcastToUser(message.recipient_id, { type: 'message_deleted', messageId: parseInt(id), forEveryone: true });
     } else {
-      await dbRun('UPDATE messages SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?', [id]);
+      await dbRun('INSERT OR IGNORE INTO message_deletions (message_id, user_id) VALUES (?, ?)', [id, userId]);
     }
 
-    broadcastToUser(message.recipient_id, { type: 'message_deleted', messageId: parseInt(id), forEveryone: !!forEveryone });
     broadcastToUser(userId, { type: 'message_deleted', messageId: parseInt(id), forEveryone: !!forEveryone });
 
     res.json({ success: true });
@@ -344,17 +374,9 @@ app.post('/api/messages/:id/reactions', authenticate, async (req, res) => {
 
     await dbRun('INSERT OR IGNORE INTO reactions (message_id, user_id, emoji) VALUES (?, ?, ?)', [id, userId, emoji]);
 
-    const reactions = await dbAll(`
-      SELECT r.*, u.username
-      FROM reactions r
-      JOIN users u ON r.user_id = u.id
-      WHERE r.message_id = ?
-    `, [id]);
+    const formatted = await getReactionsFor(id);
 
-    const formatted = reactions.map(r => ({ emoji: r.emoji, user_id: r.user_id, username: r.username }));
-
-    broadcastToUser(message.sender_id, { type: 'reactions_updated', messageId: parseInt(id), reactions: formatted });
-    broadcastToUser(message.recipient_id, { type: 'reactions_updated', messageId: parseInt(id), reactions: formatted });
+    broadcastToConversation(message.sender_id, message.recipient_id, { type: 'reactions_updated', messageId: parseInt(id), reactions: formatted });
 
     res.json({ success: true, reactions: formatted });
   } catch (e) {
@@ -372,17 +394,9 @@ app.delete('/api/messages/:id/reactions/:emoji', authenticate, async (req, res) 
 
     await dbRun('DELETE FROM reactions WHERE message_id = ? AND user_id = ? AND emoji = ?', [id, userId, emoji]);
 
-    const reactions = await dbAll(`
-      SELECT r.*, u.username
-      FROM reactions r
-      JOIN users u ON r.user_id = u.id
-      WHERE r.message_id = ?
-    `, [id]);
+    const formatted = await getReactionsFor(id);
 
-    const formatted = reactions.map(r => ({ emoji: r.emoji, user_id: r.user_id, username: r.username }));
-
-    broadcastToUser(message.sender_id, { type: 'reactions_updated', messageId: parseInt(id), reactions: formatted });
-    broadcastToUser(message.recipient_id, { type: 'reactions_updated', messageId: parseInt(id), reactions: formatted });
+    broadcastToConversation(message.sender_id, message.recipient_id, { type: 'reactions_updated', messageId: parseInt(id), reactions: formatted });
 
     res.json({ success: true, reactions: formatted });
   } catch (e) {
@@ -425,21 +439,18 @@ function broadcastToConversation(userId1, userId2, data) {
 
 wss.on('connection', (ws, req) => {
   let userId = null;
-  
-  ws.on('message', (data) => {
-    try {
-      const msg = JSON.parse(data);
-      if (msg.type === 'auth' && msg.userId) {
-        userId = msg.userId;
-        if (!clients.has(userId)) clients.set(userId, new Set());
-        clients.get(userId).add(ws);
-        ws.send(JSON.stringify({ type: 'auth_ok' }));
-      }
-    } catch (e) {
-      console.error('WebSocket message error:', e);
+
+  sessionMiddleware(req, {}, () => {
+    userId = req.session && req.session.userId;
+    if (userId) {
+      if (!clients.has(userId)) clients.set(userId, new Set());
+      clients.get(userId).add(ws);
+      ws.send(JSON.stringify({ type: 'auth_ok' }));
+    } else {
+      ws.close();
     }
   });
-  
+
   ws.on('close', () => {
     if (userId && clients.has(userId)) {
       const userClients = clients.get(userId);
@@ -457,7 +468,7 @@ app.use((req, res) => {
   }
 });
 
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`Servidor rodando em http://localhost:${PORT}`);
   console.log('Usuários: mateus / 01850309  |  debora / 23092025');
