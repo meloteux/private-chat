@@ -46,7 +46,7 @@ async function checkAuth() {
     const data = await apiRequest('/api/me');
     currentUser = data.user;
     applyTheme(currentUser.theme || 'system');
-    showChatScreen();
+    showScreen('chat-screen');
     connectWebSocket();
   } catch (e) {
     showScreen('login-screen');
@@ -62,7 +62,7 @@ async function login(username, password) {
     });
     currentUser = data.user;
     applyTheme(currentUser.theme || 'system');
-    showChatScreen();
+    showScreen('chat-screen');
     connectWebSocket();
   } catch (e) {
     showError(e.message);
