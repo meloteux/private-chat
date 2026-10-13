@@ -48,6 +48,7 @@ async function checkAuth() {
     applyTheme(currentUser.theme || 'system');
     showScreen('chat-screen');
     connectWebSocket();
+    loadContacts();
   } catch (e) {
     showScreen('login-screen');
   }
@@ -64,6 +65,7 @@ async function login(username, password) {
     applyTheme(currentUser.theme || 'system');
     showScreen('chat-screen');
     connectWebSocket();
+    loadContacts();
   } catch (e) {
     showError(e.message);
   }
