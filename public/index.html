@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chat Privado</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="login-screen" class="screen active">
+    <div class="login-container">
+      <h1>💬 Chat Privado</h1>
+      <p class="subtitle">Conversa segura entre você e sua pessoa especial</p>
+      <form id="login-form">
+        <div class="form-group">
+          <label for="username">Usuário</label>
+          <input type="text" id="username" name="username" required autocomplete="username">
+        </div>
+        <div class="form-group">
+          <label for="password">Senha</label>
+          <input type="password" id="password" name="password" required autocomplete="current-password">
+        </div>
+        <button type="submit" class="btn btn-primary">Entrar</button>
+      </form>
+      <div id="login-error" class="error hidden"></div>
+    </div>
+  </div>
+
+  <div id="chat-screen" class="screen hidden">
+    <header class="chat-header">
+      <div class="header-left">
+        <button id="logout-btn" class="btn btn-secondary btn-sm">Sair</button>
+        <h2 id="chat-title">Chat Privado</h2>
+      </div>
+      <div class="header-right">
+        <span id="current-user" class="user-badge"></span>
+      </div>
+    </header>
+    
+    <main class="chat-main">
+      <aside class="contacts-panel">
+        <h3>Contatos</h3>
+        <ul id="contacts-list" class="contacts-list"></ul>
+      </aside>
+      
+      <section class="chat-panel">
+        <div id="no-chat-selected" class="no-chat">
+          <p>Selecione um contato para começar a conversar</p>
+        </div>
+        <div id="chat-container" class="chat-container hidden">
+          <div id="messages-area" class="messages-area"></div>
+          <form id="message-form" class="message-form">
+            <input type="text" id="message-input" placeholder="Digite sua mensagem..." required autocomplete="off">
+            <button type="submit" class="btn btn-primary">Enviar</button>
+          </form>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,22 @@
+{
+  "name": "private-chat",
+  "version": "1.0.0",
+  "description": "Private chat application for two users",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^9.4.3",
+    "express": "^4.18.2",
+    "express-session": "^1.17.3",
+    "sqlite3": "^6.0.1",
+    "uuid": "^9.0.1",
+    "ws": "^8.16.0"
+  },
+  "allowScripts": {
+    "sqlite3@6.0.1": true
+  }
+}
