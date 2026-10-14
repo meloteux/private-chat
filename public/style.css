@@ -934,28 +934,56 @@ body {
     font-size: 13px;
   }
 
-  /* Keep the composer on ONE row so it doesn't eat vertical space */
+  /* Keep the composer on ONE row so it doesn't eat vertical space.
+     CRITICAL: .btn-primary has `width: 100%` in the base stylesheet. On mobile
+     that must be reset to `width: auto`, otherwise the Enviar button claims the
+     whole row (flex-basis:auto + flex-shrink:0) and the text input collapses to
+     zero width and becomes untappable. */
   .message-form {
     flex-direction: row;
     align-items: center;
+    gap: 6px;
     padding: 10px 12px;
     padding-bottom: max(10px, env(safe-area-inset-bottom));
   }
 
   .message-input-wrapper {
-    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1 1 auto;
     min-width: 0;
   }
 
-  .message-form input {
-    width: 100%;
+  .attach-btn,
+  .audio-btn {
+    flex: 0 0 auto;
+    padding: 10px;
+    font-size: 18px;
+  }
+
+  /* Target the text field by ID so the hidden file input is never affected */
+  #message-input {
+    flex: 1 1 auto;
+    width: auto;
     min-width: 0;
+    padding: 12px 14px;
+    font-size: 16px; /* 16px prevents iOS Safari from auto-zooming on focus */
+    border-radius: 24px;
+  }
+
+  #file-input {
+    display: none;
   }
 
   .message-form .btn-primary {
     flex: 0 0 auto;
+    width: auto; /* overrides base `.btn-primary { width: 100% }` */
+    min-width: 0;
     padding: 12px 14px;
     font-size: 14px;
+    border-radius: 24px;
+    white-space: nowrap;
   }
 
   /* Toasts must fit narrow screens */
@@ -1000,6 +1028,33 @@ body {
     width: calc(100% - 24px);
     max-width: none;
     padding: 20px 16px;
+  }
+
+  /* Tighter header on phones so the back button, title and actions all fit */
+  .chat-header {
+    gap: 6px;
+    padding: 8px 10px;
+    padding-top: max(8px, env(safe-area-inset-top));
+  }
+
+  .header-left,
+  .header-right {
+    gap: 6px;
+  }
+
+  #logout-btn {
+    padding: 6px 10px;
+    font-size: 13px;
+  }
+
+  .header-left h2 {
+    max-width: 30vw;
+    font-size: 15px;
+  }
+
+  .user-badge {
+    padding: 4px 8px;
+    font-size: 12px;
   }
 }
 
