@@ -232,6 +232,8 @@ body {
 .chat-main {
   display: flex;
   height: calc(100vh - 70px);
+  height: calc(100dvh - 70px);
+  min-height: 0;
 }
 
 .contacts-panel {
@@ -687,27 +689,6 @@ body {
   font-size: 11px;
 }
 
-@media (max-width: 768px) {
-  .chat-main {
-    flex-direction: column;
-  }
-
-  .contacts-panel {
-    width: 100%;
-    max-height: 200px;
-    border-right: none;
-    border-bottom: 1px solid var(--border);
-  }
-
-  .message {
-    max-width: 85%;
-  }
-
-  .message-audio {
-    min-width: 160px;
-  }
-}
-
 .contact-status {
   width: 10px;
   height: 10px;
@@ -852,4 +833,179 @@ body {
 .contact-search:focus {
   outline: none;
   border-color: #3b82f6;
+}
+
+.mobile-only {
+  display: none;
+}
+
+/* ============ MOBILE / RESPONSIVE ============ */
+@media (max-width: 768px) {
+  .mobile-only {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Full-height flex chain instead of calc(100vh - 70px).
+     100dvh handles the mobile browser address bar correctly. */
+  #chat-screen {
+    height: 100vh;
+    height: 100dvh;
+  }
+
+  #chat-screen.active {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .chat-header {
+    flex: 0 0 auto;
+    gap: 8px;
+    padding: 10px 12px;
+    padding-top: max(10px, env(safe-area-inset-top));
+  }
+
+  .header-left,
+  .header-right {
+    gap: 8px;
+  }
+
+  .header-left h2 {
+    overflow: hidden;
+    font-size: 16px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 34vw;
+  }
+
+  .chat-main {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    height: auto;
+    overflow: hidden;
+  }
+
+  /* Both panels are absolutely positioned and full-bleed.
+     Contacts are the default view; the conversation slides in from the right
+     when the body has the .mobile-chat-open class (set by app.js). */
+  .contacts-panel,
+  .chat-panel {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+  }
+
+  .contacts-panel {
+    max-height: none;
+    padding: 12px;
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+    border-right: none;
+  }
+
+  .chat-panel {
+    transform: translateX(100%);
+    transition: transform 0.25s ease;
+    will-change: transform;
+  }
+
+  body.mobile-chat-open .chat-panel {
+    transform: translateX(0);
+  }
+
+  /* Compact chat chrome */
+  .messages-area {
+    gap: 8px;
+    padding: 12px;
+  }
+
+  .message {
+    max-width: 88%;
+    padding: 10px 12px;
+  }
+
+  .message-audio {
+    min-width: 170px;
+  }
+
+  .reply-preview {
+    padding: 6px 12px;
+    font-size: 13px;
+  }
+
+  /* Keep the composer on ONE row so it doesn't eat vertical space */
+  .message-form {
+    flex-direction: row;
+    align-items: center;
+    padding: 10px 12px;
+    padding-bottom: max(10px, env(safe-area-inset-bottom));
+  }
+
+  .message-input-wrapper {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .message-form input {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .message-form .btn-primary {
+    flex: 0 0 auto;
+    padding: 12px 14px;
+    font-size: 14px;
+  }
+
+  /* Toasts must fit narrow screens */
+  .toast-container {
+    right: 12px;
+    left: 12px;
+    align-items: stretch;
+  }
+
+  .toast {
+    max-width: none;
+    width: 100%;
+  }
+
+  /* Prevent text selection / long-press callout from interfering with the
+     long-press context menu and tap targets */
+  .message {
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+    touch-action: manipulation;
+  }
+
+  .message-content {
+    user-select: text;
+    -webkit-user-select: text;
+  }
+
+  /* Login screen: remove the huge desktop margin/padding */
+  .login-container {
+    width: auto;
+    max-width: none;
+    margin: 32px 16px;
+    padding: 28px 20px;
+  }
+
+  .login-container h1 {
+    font-size: 24px;
+  }
+
+  .modal-content {
+    width: calc(100% - 24px);
+    max-width: none;
+    padding: 20px 16px;
+  }
+}
+
+/* Desktop keeps .mobile-only hidden */
+@media (min-width: 769px) {
+  .mobile-only {
+    display: none;
+  }
 }

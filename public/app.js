@@ -86,6 +86,7 @@ async function logout() {
     currentUser = null;
     selectedContact = null;
     showScreen('login-screen');
+    document.body.classList.remove('mobile-chat-open');
     document.getElementById('login-form').reset();
   } catch (e) {
     console.error('Logout error:', e);
@@ -261,6 +262,7 @@ async function selectContact(contact) {
       loadMessages(oldestMessageId).finally(() => { isLoadingOlder = false; });
     }
   };
+  document.body.classList.add('mobile-chat-open');
 }
 
 function markConversationAsRead(otherUserId) {
@@ -679,20 +681,37 @@ function openContextMenu(e, msg, isMine) {
       item.style.display = 'flex';
     }
   });
-  menu.style.left = `${e.clientX}px`;
-  menu.style.top = `${e.clientY}px`;
+  // Show first so the element has measurable dimensions
   menu.classList.remove('hidden');
   hideReactionPicker();
+
+  const margin = 8;
+  const menuWidth = menu.offsetWidth || 180;
+  const menuHeight = menu.offsetHeight || 220;
+  const maxLeft = Math.max(margin, window.innerWidth - menuWidth - margin);
+  const maxTop = Math.max(margin, window.innerHeight - menuHeight - margin);
+  const left = Math.min(Math.max(margin, e.clientX), maxLeft);
+  const top = Math.min(Math.max(margin, e.clientY), maxTop);
+  menu.style.left = `${left}px`;
+  menu.style.top = `${top}px`;
 }
 
 function openQuickReactions(e, msg) {
   const picker = document.getElementById('reaction-picker');
   picker.dataset.messageId = msg.id;
   const rect = e.currentTarget.getBoundingClientRect();
-  picker.style.left = `${Math.min(rect.left, window.innerWidth - 260)}px`;
-  picker.style.top = `${rect.top - 50}px`;
   picker.classList.remove('hidden');
   hideContextMenu();
+
+  const margin = 8;
+  const pickerWidth = picker.offsetWidth || 260;
+  const pickerHeight = picker.offsetHeight || 50;
+  const maxLeft = Math.max(margin, window.innerWidth - pickerWidth - margin);
+  const maxTop = Math.max(margin, window.innerHeight - pickerHeight - margin);
+  const left = Math.min(Math.max(margin, rect.left), maxLeft);
+  const top = Math.min(Math.max(margin, rect.top - 50), maxTop);
+  picker.style.left = `${left}px`;
+  picker.style.top = `${top}px`;
 }
 
 function hideContextMenu() {
@@ -920,6 +939,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.getElementById('logout-btn').addEventListener('click', logout);
   document.getElementById('theme-toggle').addEventListener('click', toggleTheme);
+
+  const backBtn = document.getElementById('back-btn');
+  if (backBtn) {
+    backBtn.addEventListener('click', () => {
+      document.body.classList.remove('mobile-chat-open');
+    });
+  }
 
   document.getElementById('message-form').addEventListener('submit', (e) => {
     e.preventDefault();
