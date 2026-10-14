@@ -14,6 +14,14 @@ let lastMessageIds = new Set();
 let hasMoreMessages = false;
 let oldestMessageId = null;
 let isLoadingOlder = false;
+let typingTimeout = null;
+let typingUsers = new Set();
+let searchQuery = '';
+let pinnedMessages = new Set();
+let onlineUsers = new Map();
+let lastReadMessageId = null;
+let messageSearchTimeout = null;
+let allContacts = [];
 
 async function apiRequest(url, options = {}) {
   const response = await fetch(url, {
@@ -97,6 +105,12 @@ function connectWebSocket() {
 function handleWsMessage(data) {
   if (!selectedContact) {
     if (data.type === 'new_message') loadContacts();
+    // Handle other events even without selected contact
+    if (data.type === 'presence_update') loadContacts();
+    if (data.type === 'typing_update') {
+      // Show toast for typing when no contact selected
+      showToast(`${data.username} está digitando`, 'info');
+    }
     return;
   }
   switch (data.type) {
@@ -104,8 +118,12 @@ function handleWsMessage(data) {
       const m = data.message;
       const isRelevant = (m.sender_id === currentUser.id || m.recipient_id === currentUser.id) &&
         (m.sender_id === selectedContact.id || m.recipient_id === selectedContact.id);
-      if (isRelevant) appendMessage(m);
-      else if (m.sender_id !== currentUser.id) loadContacts();
+      if (isRelevant) {
+        appendMessage(m);
+        if (m.sender_id !== currentUser.id) {
+          fetch(`/api/messages/${m.id}/read`, { method: 'POST', credentials: 'include' }).catch(() => {});
+        }
+      } else if (m.sender_id !== currentUser.id) loadContacts();
       break;
     }
     case 'message_updated': {
@@ -124,34 +142,100 @@ function handleWsMessage(data) {
       updateReactionsElement(data.messageId, data.reactions);
       break;
     }
-    case 'auth_ok':
+    case 'typing_update': {
+      if (data.status === 'typing') {
+        showTypingIndicator(data.userId);
+      } else {
+        hideTypingIndicator(data.userId);
+      }
       break;
+    }
+    case 'presence_update': {
+      // Update online users map
+      if (data.userId && data.status) {
+        onlineUsers.set(data.userId, data.status);
+        // Re-render contacts to show online status
+        loadContacts();
+      }
+      break;
+    }
+    case 'message_read': {
+      const el = document.querySelector(`.message[data-message-id="${data.messageId}"]`);
+      if (el && data.messageId) {
+        let receipt = el.querySelector('.read-receipt');
+        if (!receipt) {
+          receipt = document.createElement('span');
+          receipt.className = 'read-receipt';
+          receipt.textContent = '✓✓';
+          const header = el.querySelector('.message-header');
+          if (header) header.appendChild(receipt);
+        }
+      }
+      break;
+    }
   }
 }
 
 async function loadContacts() {
   try {
     const data = await apiRequest('/api/users');
+    // Also load online status
+    try {
+      const onlineData = await apiRequest('/api/users/online');
+      onlineData.users.forEach(u => {
+        onlineUsers.set(u.id, u.status || 'offline');
+      });
+    } catch (e) {
+      console.warn('Failed to load online status:', e);
+    }
     renderContacts(data.users);
   } catch (e) {
     console.error('Failed to load contacts:', e);
+    showToast('Erro ao carregar contatos', 'error');
   }
 }
 
 function renderContacts(users) {
+  allContacts = users || [];
   const list = document.getElementById('contacts-list');
   list.innerHTML = '';
+  if (!users || !users.length) {
+    list.innerHTML = '<li class="contact-item"><span>Nenhum contato</span></li>';
+    return;
+  }
   users.forEach(user => {
-    const li = document.createElement('li');
-    li.className = 'contact-item' + (selectedContact && selectedContact.id === user.id ? ' active' : '');
-    li.dataset.userId = user.id;
-    const avatar = user.avatar_url
-      ? `<img class="contact-avatar" src="${user.avatar_url}" alt="${user.username}">`
-      : `<div class="contact-avatar">${user.username.charAt(0).toUpperCase()}</div>`;
-    li.innerHTML = `${avatar}<span class="contact-name">${escapeHtml(user.username)}</span>`;
-    li.addEventListener('click', () => selectContact(user));
-    list.appendChild(li);
+    list.appendChild(buildContactItem(user));
   });
+  applyContactFilter();
+}
+
+function buildContactItem(user) {
+  const li = document.createElement('li');
+  li.className = 'contact-item' + (selectedContact && selectedContact.id === user.id ? ' active' : '');
+  li.dataset.userId = user.id;
+  const status = onlineUsers.get(user.id) || 'offline';
+  const statusClass = status === 'online' ? 'online' : status === 'typing' ? 'typing' : 'offline';
+  const avatar = user.avatar_url
+    ? `<img class="contact-avatar" src="${user.avatar_url}" alt="${user.username}">`
+    : `<div class="contact-avatar">${user.username.charAt(0).toUpperCase()}</div>`;
+  li.innerHTML = `${avatar}<span class="contact-name">${escapeHtml(user.username)}</span><span class="contact-status ${statusClass}"></span>`;
+  li.addEventListener('click', () => selectContact(user));
+  return li;
+}
+
+function applyContactFilter() {
+  const search = document.getElementById('contact-search');
+  const q = (search && search.value ? search.value : '').trim().toLowerCase();
+  const filtered = q
+    ? allContacts.filter(u => u.username.toLowerCase().includes(q))
+    : allContacts;
+  const list = document.getElementById('contacts-list');
+  list.innerHTML = '';
+  if (!filtered.length) {
+    list.innerHTML = '<li class="contact-item"><span>Nenhum contato encontrado</span></li>';
+    return;
+  }
+  filtered.forEach(user => list.appendChild(buildContactItem(user)));
 }
 
 async function selectContact(contact) {
@@ -165,6 +249,9 @@ async function selectContact(contact) {
   document.getElementById('no-chat-selected').classList.add('hidden');
   document.getElementById('chat-container').classList.remove('hidden');
   document.getElementById('chat-title').textContent = `Conversa com ${contact.username}`;
+  markConversationAsRead(contact.id);
+  typingUsers.clear();
+  renderTypingIndicator();
   await loadMessages();
   const area = document.getElementById('messages-area');
   area.onscroll = () => {
@@ -174,6 +261,13 @@ async function selectContact(contact) {
       loadMessages(oldestMessageId).finally(() => { isLoadingOlder = false; });
     }
   };
+}
+
+function markConversationAsRead(otherUserId) {
+  fetch(`/api/conversations/${otherUserId}/read`, {
+    method: 'POST',
+    credentials: 'include'
+  }).catch(() => {});
 }
 
 async function loadMessages(before) {
@@ -211,8 +305,23 @@ async function loadMessages(before) {
 
 function renderMessages(messages) {
   const area = document.getElementById('messages-area');
+  if (!area) return;
   area.innerHTML = '';
-  messages.forEach(msg => area.appendChild(buildMessageElement(msg)));
+
+  let lastDateLabel = null;
+  messages.forEach(msg => {
+    const dateLabel = formatDateSeparator(msg.created_at);
+    if (dateLabel !== lastDateLabel) {
+      lastDateLabel = dateLabel;
+      const dateEl = document.createElement('div');
+      dateEl.className = 'message-date-separator';
+      dateEl.dataset.date = dateLabel;
+      dateEl.textContent = dateLabel;
+      area.appendChild(dateEl);
+    }
+    area.appendChild(buildMessageElement(msg));
+  });
+
   area.scrollTop = area.scrollHeight;
 }
 
@@ -239,6 +348,7 @@ function buildMessageElement(msg) {
 
   const time = formatTime(msg.created_at);
   const isMine = msg.sender_id === currentUser.id;
+  const readReceipt = isMine && msg.read_at ? '<span class="read-receipt">✓✓</span>' : '';
 
   let bodyHtml = '';
   if (msg.deleted_at) {
@@ -246,6 +356,9 @@ function buildMessageElement(msg) {
   } else {
     if (msg.reply_to_id) {
       bodyHtml += `<div class="message-reply">↩ respondendo</div>`;
+    }
+    if (msg.is_pinned) {
+      bodyHtml += '<div class="message-pinned">📌 Mensagem fixada</div>';
     }
     switch (msg.type) {
       case 'image':
@@ -265,6 +378,7 @@ function buildMessageElement(msg) {
     <div class="message-header">
       <span class="message-sender">${escapeHtml(msg.sender_name)}</span>
       <span class="message-time">${time}</span>
+      ${readReceipt}
     </div>
     ${bodyHtml}
   `;
@@ -365,6 +479,119 @@ function formatDuration(seconds) {
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
   return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+// Toast notifications
+function showToast(message, type = 'info', duration = 3000) {
+  let container = document.getElementById('toast-container');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'toast-container';
+    container.style.cssText = 'position:fixed;top:20px;right:20px;z-index:10000;display:flex;flex-direction:column;gap:8px';
+    document.body.appendChild(container);
+  }
+  
+  const toast = document.createElement('div');
+  toast.className = `toast toast-${type}`;
+  toast.textContent = message;
+  toast.style.cssText = `
+    background:${type === 'error' ? '#ef4444' : type === 'success' ? '#10b981' : '#3b82f6'};
+    color:white;padding:12px 16px;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.3);
+    animation:slideIn 0.3s ease;max-width:300px;
+  `;
+  container.appendChild(toast);
+  
+  setTimeout(() => {
+    toast.style.animation = 'slideOut 0.3s ease';
+    setTimeout(() => toast.remove(), 300);
+  }, duration);
+}
+
+// Typing indicator UI
+function showTypingIndicator(userId) {
+  if (!selectedContact || userId !== selectedContact.id) return;
+  typingUsers.add(userId);
+  renderTypingIndicator();
+}
+
+function hideTypingIndicator(userId) {
+  typingUsers.delete(userId);
+  renderTypingIndicator();
+}
+
+function renderTypingIndicator() {
+  let indicator = document.getElementById('typing-indicator');
+  if (!indicator) {
+    indicator = document.createElement('div');
+    indicator.id = 'typing-indicator';
+    indicator.className = 'typing-indicator hidden';
+    const area = document.getElementById('messages-area');
+    area.parentNode.insertBefore(indicator, area.nextSibling);
+  }
+  
+  if (typingUsers.size > 0) {
+    const names = Array.from(typingUsers).map(id => {
+      if (id === selectedContact.id) return selectedContact.username;
+      return 'Alguém';
+    });
+    indicator.innerHTML = `${names.join(', ')} ${typingUsers.size === 1 ? 'está digitando' : 'estão digitando'}...`;
+    indicator.classList.remove('hidden');
+    // Scroll to bottom to show indicator
+    const area = document.getElementById('messages-area');
+    area.scrollTop = area.scrollHeight;
+  } else {
+    indicator.classList.add('hidden');
+  }
+}
+
+// Auto-resize textarea
+function autoResizeTextarea(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 150) + 'px';
+}
+
+// Copy message to clipboard
+function copyMessageText(messageId) {
+  const el = document.querySelector(`.message[data-message-id="${messageId}"] .message-content`);
+  if (el) {
+    navigator.clipboard.writeText(el.textContent).then(() => {
+      showToast('Mensagem copiada', 'success');
+    }).catch(() => {
+      showToast('Erro ao copiar', 'error');
+    });
+  }
+}
+
+// Format relative time
+function formatRelativeTime(dateStr) {
+  if (!dateStr) return '';
+  const date = new Date(dateStr + 'Z');
+  const now = new Date();
+  const diff = now - date;
+  const minutes = Math.floor(diff / 60000);
+  const hours = Math.floor(diff / 3600000);
+  const days = Math.floor(diff / 86400000);
+  
+  if (minutes < 1) return 'agora';
+  if (minutes < 60) return `${minutes}min`;
+  if (hours < 24) return `${hours}h`;
+  if (days < 7) return `${days}d`;
+  return date.toLocaleDateString('pt-BR');
+}
+
+// Date separator helper
+function formatDateSeparator(dateStr) {
+  if (!dateStr) return '';
+  const date = new Date(dateStr + 'Z');
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const msgDate = new Date(date);
+  msgDate.setHours(0, 0, 0, 0);
+  
+  const diff = (today - msgDate) / 86400000;
+  if (diff === 0) return 'Hoje';
+  if (diff === 1) return 'Ontem';
+  return date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
 function escapeHtml(text) {
@@ -699,6 +926,20 @@ document.addEventListener('DOMContentLoaded', () => {
     sendMessage(document.getElementById('message-input').value);
   });
 
+  const messageInput = document.getElementById('message-input');
+  messageInput.addEventListener('input', () => {
+    if (!selectedContact || !ws || ws.readyState !== 1) return;
+    ws.send(JSON.stringify({ type: 'typing_start', recipientId: selectedContact.id }));
+    clearTimeout(typingTimeout);
+    typingTimeout = setTimeout(() => {
+      if (ws && ws.readyState === 1) {
+        ws.send(JSON.stringify({ type: 'typing_stop', recipientId: selectedContact.id }));
+      }
+    }, 2000);
+  });
+
+  document.getElementById('contact-search').addEventListener('input', applyContactFilter);
+
   document.getElementById('attach-btn').addEventListener('click', () => {
     document.getElementById('file-input').click();
   });
@@ -740,6 +981,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (!e.target.closest('.reaction-picker') && !e.target.closest('.message')) {
       hideReactionPicker();
+    }
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      hideContextMenu();
+      hideReactionPicker();
+      if (replyTo || editingMessageId) cancelReply();
     }
   });
 

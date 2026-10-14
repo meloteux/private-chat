@@ -90,15 +90,10 @@ async function init() {
   }
 
   const msgMigrations = [
-    ['type', "ALTER TABLE messages ADD COLUMN type TEXT DEFAULT 'text'"],
-    ['media_url', 'ALTER TABLE messages ADD COLUMN media_url TEXT'],
-    ['media_name', 'ALTER TABLE messages ADD COLUMN media_name TEXT'],
-    ['media_size', 'ALTER TABLE messages ADD COLUMN media_size INTEGER'],
-    ['media_duration', 'ALTER TABLE messages ADD COLUMN media_duration INTEGER'],
-    ['reply_to_id', 'ALTER TABLE messages ADD COLUMN reply_to_id INTEGER'],
-    ['edited_at', 'ALTER TABLE messages ADD COLUMN edited_at DATETIME'],
-    ['deleted_at', 'ALTER TABLE messages ADD COLUMN deleted_at DATETIME'],
-    ['deleted_for_everyone', 'ALTER TABLE messages ADD COLUMN deleted_for_everyone BOOLEAN DEFAULT 0']
+    ['typing_status', 'ALTER TABLE messages ADD COLUMN typing_status TEXT'],
+    ['edit_history', 'ALTER TABLE messages ADD COLUMN edit_history TEXT'],
+    ['read_at', 'ALTER TABLE messages ADD COLUMN read_at DATETIME'],
+    ['is_pinned', 'ALTER TABLE messages ADD COLUMN is_pinned BOOLEAN DEFAULT 0']
   ];
   for (const [col, sql] of msgMigrations) {
     if (!msgCols.includes(col)) {
@@ -107,9 +102,30 @@ async function init() {
     }
   }
 
+  await run(`CREATE TABLE IF NOT EXISTS settings (
+    user_id INTEGER PRIMARY KEY,
+    theme TEXT DEFAULT 'system',
+    notifications BOOLEAN DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+  )`);
+
+  await run(`CREATE TABLE IF NOT EXISTS user_presence (
+    user_id INTEGER PRIMARY KEY,
+    status TEXT DEFAULT 'offline',
+    last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
+    typing_to INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    FOREIGN KEY (typing_to) REFERENCES users(id)
+  )`);
+
   await run(`CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(sender_id, recipient_id)`);
   await run(`CREATE INDEX IF NOT EXISTS idx_reactions_message ON reactions(message_id)`);
   await run(`CREATE INDEX IF NOT EXISTS idx_message_deletions_lookup ON message_deletions(message_id, user_id)`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_messages_read ON messages(recipient_id, read_at)`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_messages_pinned ON messages(sender_id, recipient_id, is_pinned)`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_messages_search ON messages(content)`);
   await run('PRAGMA foreign_keys = ON');
 
   const users = [
