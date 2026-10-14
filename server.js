@@ -188,6 +188,23 @@ function authenticate(req, res, next) {
   else res.status(401).json({ error: 'Não autenticado' });
 }
 
+// ---- Build identification (helps verify which code a client is running) ----
+let BUILD_ID = 'dev';
+try {
+  const { execSync } = require('child_process');
+  BUILD_ID = execSync('git rev-parse --short HEAD', {
+    cwd: __dirname,
+    stdio: ['ignore', 'pipe', 'ignore']
+  }).toString().trim() || BUILD_ID;
+} catch (e) {
+  BUILD_ID = 'no-git';
+}
+
+app.get('/api/build', (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.json({ build: BUILD_ID, node: process.version, uptime: Math.floor(process.uptime()) });
+});
+
 app.post('/api/login', async (req, res) => {
   try {
     const { username, password } = req.body;

@@ -906,14 +906,15 @@ body {
     border-right: none;
   }
 
+  /* Display-toggling instead of transform. A transform on an ancestor becomes
+     the containing block for position:fixed descendants, which would break the
+     pinned composer below. */
   .chat-panel {
-    transform: translateX(100%);
-    transition: transform 0.25s ease;
-    will-change: transform;
+    display: none;
   }
 
   body.mobile-chat-open .chat-panel {
-    transform: translateX(0);
+    display: flex;
   }
 
   /* Compact chat chrome. min-height:0 + overflow-y:auto is required so the
@@ -958,6 +959,22 @@ body {
     padding-bottom: max(10px, env(safe-area-inset-bottom));
     background: var(--bg-secondary);
     border-top: 1px solid var(--border);
+  }
+
+  /* LAST-RESORT GUARANTEE: pin the composer to the viewport bottom. Even if
+     some flex/height propagation surprises us, this keeps the field on screen. */
+  #message-form {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 60;
+  }
+
+  /* Reserve space so the last messages are not hidden behind the pinned
+     composer. 84px covers the ~44px composer plus iOS safe-area inset. */
+  #messages-area {
+    padding-bottom: 84px;
   }
 
   .message-input-wrapper {
@@ -1113,5 +1130,20 @@ body {
    Note: .screen.active and #chat-screen.active have higher specificity than
    .hidden, so the login/chat screens still switch correctly. */
 .hidden {
+  display: none;
+}
+
+.build-id {
+  padding: 3px 7px;
+  border-radius: 6px;
+  background: rgba(127, 127, 127, 0.18);
+  color: var(--text-secondary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+
+.build-id:empty {
   display: none;
 }

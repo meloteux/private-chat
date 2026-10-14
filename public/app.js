@@ -1019,4 +1019,12 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   checkAuth();
+
+  fetch('/api/build', { credentials: 'include' })
+    .then(r => r.json())
+    .then(d => {
+      const el = document.getElementById('build-id');
+      if (el && d.build) el.textContent = `#${d.build}`;
+    })
+    .catch(() => {});
 });
