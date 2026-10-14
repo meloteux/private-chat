@@ -847,14 +847,16 @@ body {
     justify-content: center;
   }
 
-  /* Full-height flex chain instead of calc(100vh - 70px).
-     100dvh handles the mobile browser address bar correctly. */
-  #chat-screen {
-    height: 100vh;
-    height: 100dvh;
-  }
-
+  /* position:fixed + inset:0 is the robust full-screen shell for mobile.
+     It matches the layout viewport exactly and is immune to the iOS Safari
+     dvh bug where 100dvh resolves taller than the visible area, which was
+     pushing the composer off-screen. */
   #chat-screen.active {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
     display: flex;
     flex-direction: column;
   }
@@ -914,10 +916,15 @@ body {
     transform: translateX(0);
   }
 
-  /* Compact chat chrome */
+  /* Compact chat chrome. min-height:0 + overflow-y:auto is required so the
+     scroll container can actually shrink and the composer stays visible. */
   .messages-area {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
     gap: 8px;
     padding: 12px;
+    -webkit-overflow-scrolling: touch;
   }
 
   .message {
@@ -939,12 +946,18 @@ body {
      that must be reset to `width: auto`, otherwise the Enviar button claims the
      whole row (flex-basis:auto + flex-shrink:0) and the text input collapses to
      zero width and becomes untappable. */
+  /* flex: 0 0 auto keeps the composer at its natural size. Its sibling
+     #messages-area has flex:1, so without an explicit flex-shrink:0 the
+     composer could be squeezed to zero height and disappear. */
   .message-form {
+    flex: 0 0 auto;
     flex-direction: row;
     align-items: center;
     gap: 6px;
     padding: 10px 12px;
     padding-bottom: max(10px, env(safe-area-inset-bottom));
+    background: var(--bg-secondary);
+    border-top: 1px solid var(--border);
   }
 
   .message-input-wrapper {
@@ -1055,6 +1068,37 @@ body {
   .user-badge {
     padding: 4px 8px;
     font-size: 12px;
+  }
+
+  /* In a 1:1 chat the sender name inside your own bubbles is pure noise */
+  .message.sent .message-sender {
+    display: none;
+  }
+
+  .message.received .message-sender {
+    font-size: 11px;
+    font-weight: 600;
+    opacity: 0.75;
+  }
+
+  /* Images were expanding to the full chat width. Cap them so the bubble
+     keeps its shape and the chat stays readable. */
+  .message-image {
+    max-width: min(100%, 260px);
+    height: auto;
+    border-radius: 12px;
+    display: block;
+  }
+
+  /* Keep edit/pin/date-separator chrome from overflowing narrow bubbles */
+  .message-pinned,
+  .message-reply,
+  .message-date-separator {
+    max-width: 100%;
+  }
+
+  .message-reactions {
+    max-width: 100%;
   }
 }
 
