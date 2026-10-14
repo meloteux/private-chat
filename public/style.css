@@ -1009,3 +1009,10 @@ body {
     display: none;
   }
 }
+
+/* Generic .hidden utility.
+   Note: .screen.active and #chat-screen.active have higher specificity than
+   .hidden, so the login/chat screens still switch correctly. */
+.hidden {
+  display: none;
+}

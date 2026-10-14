@@ -164,7 +164,15 @@ async function assertValidReplyTo(replyToId, senderId, recipientId) {
 
 app.use(express.json());
 app.use('/uploads', express.static(uploadsDir));
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, 'public'), {
+  etag: true,
+  lastModified: true,
+  setHeaders: (res) => {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+  }
+}));
 const sessionMiddleware = session({
   secret: process.env.SESSION_SECRET || generateRandomSecret(),
   resave: false,
